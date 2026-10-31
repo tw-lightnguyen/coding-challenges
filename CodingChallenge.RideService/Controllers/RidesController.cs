@@ -1,3 +1,4 @@
+using CodingChallenge.RideService.Dtos;
 using Microsoft.AspNetCore.Mvc;
 
 namespace CodingChallenge.RideService.Controllers;
@@ -6,8 +7,23 @@ namespace CodingChallenge.RideService.Controllers;
 [Route("[controller]")]
 public class RidesController : ControllerBase
 {
-    public Task CreateRide()
+    private readonly Services.RideService _rideService;
+
+    public RidesController(Services.RideService rideService)
     {
-        return Task.CompletedTask;
+        _rideService = rideService;
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> CreateRide(CreateRideRequest request, [FromHeader(Name = "Idempotency-Key")] Guid idempotencyKey)
+    {
+        if (idempotencyKey == Guid.Empty)
+        {
+            return BadRequest("Idempotency key is required.");
+        }
+
+        var result = await _rideService.CreateRide(request, idempotencyKey);
+
+        return Ok(result);
     }
 }

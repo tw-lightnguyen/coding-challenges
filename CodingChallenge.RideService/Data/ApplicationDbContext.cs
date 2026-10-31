@@ -14,6 +14,7 @@ public class ApplicationDbContext : DbContext
     public DbSet<Driver> Drivers { get; set; }
     public DbSet<Ride> Rides { get; set; }
     public DbSet<Passenger> Passengers { get; set; }
+    public DbSet<IdempotencyKey> IdempotencyKeys { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
