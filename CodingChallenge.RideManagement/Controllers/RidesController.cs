@@ -16,6 +16,13 @@ public class RidesController : ControllerBase
         _rideService = rideService;
     }
 
+    [HttpGet("{rideId:guid}")]
+    public async Task<IActionResult> GetRide(Guid rideId)
+    {
+        var ride = await _rideService.GetRideById(rideId);
+        return ride is null ? NotFound() : Ok(ride);
+    }
+
     [HttpPost]
     public async Task<IActionResult> CreateRide(CreateRideRequest request, [FromHeader(Name = "Idempotency-Key")] Guid idempotencyKey)
     {

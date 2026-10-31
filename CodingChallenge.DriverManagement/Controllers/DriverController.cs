@@ -15,6 +15,33 @@ public class DriverController : ControllerBase
         _driverService = driverService;
     }
 
+    [HttpPost]
+    public async Task<IActionResult> CreateDriver([FromBody] CreateDriverRequest request)
+    {
+        var driver = await _driverService.CreateDriver(request.Name);
+        return CreatedAtAction(nameof(GetDriver), new { driverId = driver.Id }, driver);
+    }
+
+    [HttpGet("{driverId:guid}")]
+    public async Task<IActionResult> GetDriver(Guid driverId)
+    {
+        var driver = await _driverService.GetDriverById(driverId);
+        return driver is null ? NotFound() : Ok(driver);
+    }
+
+    [HttpGet("{driverId:guid}/offers")]
+    public async Task<IActionResult> GetDriverOffers(Guid driverId)
+    {
+        try
+        {
+            return Ok(await _driverService.GetOffersForDriver(driverId));
+        }
+        catch (KeyNotFoundException exception)
+        {
+            return NotFound(exception.Message);
+        }
+    }
+
     [HttpPut("{driverId}/availability")]
     public async Task<IActionResult> UpdateDriverAvailability(Guid driverId, [FromBody] bool isAvailable)
     {

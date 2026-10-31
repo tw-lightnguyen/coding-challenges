@@ -20,6 +20,32 @@ public class DriverServiceTest
     }
 
     [Fact]
+    public async Task CreateDriver_ShouldCreateOfflineDriverAndExposeItsOffers()
+    {
+        using var dbContext = new ApplicationDbContext(CreateIsolatedOptions());
+        var service = new DriverService(dbContext);
+
+        var driver = await service.CreateDriver("Postman driver");
+        var offers = await service.GetOffersForDriver(driver.Id);
+
+        Assert.Equal("Postman driver", driver.Name);
+        Assert.Equal(DriverStatus.OFFLINE, driver.Status);
+        Assert.Empty(offers);
+        Assert.Equal(driver.Id, (await service.GetDriverById(driver.Id))?.Id);
+
+        var offer = new Offer
+        {
+            DriverId = driver.Id,
+            RideId = Guid.NewGuid(),
+            Price = 0m
+        };
+        dbContext.Offers.Add(offer);
+        await dbContext.SaveChangesAsync();
+
+        Assert.Equal(offer.Id, Assert.Single(await service.GetOffersForDriver(driver.Id)).Id);
+    }
+
+    [Fact]
     public async Task FindNearestAvailableDriver_ShouldIgnoreUnavailableAndOutOfRadiusDrivers()
     {
         // Arrange

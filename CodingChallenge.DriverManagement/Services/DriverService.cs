@@ -29,6 +29,38 @@ public class DriverService : IDriverService
         _offerResponseTimeout = TimeSpan.FromSeconds(timeoutSeconds);
     }
 
+    public async Task<Driver> CreateDriver(string name)
+    {
+        var driver = new Driver
+        {
+            Name = name,
+            Status = DriverStatus.OFFLINE
+        };
+
+        await _dbContext.Drivers.AddAsync(driver);
+        await _dbContext.SaveChangesAsync();
+        return driver;
+    }
+
+    public Task<Driver?> GetDriverById(Guid driverId) =>
+        _dbContext.Drivers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(driver => driver.Id == driverId);
+
+    public async Task<IReadOnlyList<Offer>> GetOffersForDriver(Guid driverId)
+    {
+        if (!await _dbContext.Drivers.AnyAsync(driver => driver.Id == driverId))
+        {
+            throw new KeyNotFoundException("Driver not found.");
+        }
+
+        return await _dbContext.Offers
+            .AsNoTracking()
+            .Where(offer => offer.DriverId == driverId)
+            .OrderByDescending(offer => offer.CreatedDateTime)
+            .ToListAsync();
+    }
+
     public async Task UpdateDriverAvailability(Guid driverId, bool isAvailable)
     {
         var driver = await _dbContext.Drivers.FindAsync(driverId);
