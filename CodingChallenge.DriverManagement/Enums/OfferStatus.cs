@@ -6,5 +6,6 @@ public enum OfferStatus
     ACCEPTED,
     REJECTED,
     CANCELLED,
-    TIMED_OUT
+    TIMED_OUT,
+    COMPLETED
 }

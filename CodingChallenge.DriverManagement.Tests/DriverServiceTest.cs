@@ -320,6 +320,59 @@ public class DriverServiceTest
         Assert.Equal(OfferStatus.PENDING, offer.Status);
     }
 
+    [Fact]
+    public async Task SendOfferToDriver_WhenDifferentRidesRaceForOneDriver_ShouldCreateOnlyOneOffer()
+    {
+        var databasePath = Path.Combine(
+            Path.GetTempPath(),
+            $"driver-concurrency-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<BaseDbContext>()
+            .UseSqlite($"Data Source={databasePath}")
+            .Options;
+        var driverId = Guid.NewGuid();
+        var firstRideId = Guid.NewGuid();
+        var secondRideId = Guid.NewGuid();
+
+        try
+        {
+            await using (var setupContext = new ApplicationDbContext(options))
+            {
+                await setupContext.Database.EnsureCreatedAsync();
+                setupContext.Drivers.Add(new Driver
+                {
+                    Id = driverId,
+                    Name = "Concurrent driver",
+                    Status = DriverStatus.AVAILABLE
+                });
+                await setupContext.SaveChangesAsync();
+            }
+
+            await using (var firstContext = new ApplicationDbContext(options))
+            await using (var secondContext = new ApplicationDbContext(options))
+            {
+                await firstContext.Drivers.FindAsync(driverId);
+                await secondContext.Drivers.FindAsync(driverId);
+                var firstService = new DriverService(firstContext);
+                var secondService = new DriverService(secondContext);
+
+                var results = await Task.WhenAll(
+                    firstService.SendOfferToDriver(driverId, firstRideId, 0m),
+                    secondService.SendOfferToDriver(driverId, secondRideId, 0m));
+
+                Assert.Single(results, created => created);
+                var offers = await firstContext.Offers.AsNoTracking().ToListAsync();
+                Assert.Single(offers);
+                Assert.Equal(
+                    results[0] ? firstRideId : secondRideId,
+                    offers[0].RideId);
+            }
+        }
+        finally
+        {
+            File.Delete(databasePath);
+        }
+    }
+
     [Theory]
     [InlineData(DriverStatus.OFFLINE)]
     [InlineData(DriverStatus.BUSY)]
@@ -536,7 +589,7 @@ public class DriverServiceTest
 
         // Assert
         Assert.Equal(OfferStatus.CANCELLED, cancelledOffer.Status);
-        Assert.Equal(OfferStatus.ACCEPTED, acceptedOffer.Status);
+        Assert.Equal(OfferStatus.COMPLETED, acceptedOffer.Status);
         Assert.Equal(DriverStatus.BUSY, statusAfterAcceptingRide);
         Assert.Equal(DriverStatus.AVAILABLE, driver.Status);
     }

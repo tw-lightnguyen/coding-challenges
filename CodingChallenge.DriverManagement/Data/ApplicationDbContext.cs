@@ -23,5 +23,10 @@ public class ApplicationDbContext : BaseDbContext
         {
             entity.OwnsOne(r => r.Coordinate);
         });
+
+        modelBuilder.Entity<Offer>()
+            .HasIndex(offer => offer.DriverId)
+            .IsUnique()
+            .HasFilter("\"Status\" IN (0, 1)");
     }
 }

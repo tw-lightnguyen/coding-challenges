@@ -2,6 +2,7 @@ using CodingChallenge.DriverManagement.Data;
 using CodingChallenge.DriverManagement.Enums;
 using CodingChallenge.DriverManagement.Models;
 using CodingChallenge.Share.Models;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -54,7 +55,7 @@ public class DriverService : IDriverService
         return true;
     }
 
-    public async Task SendOfferToDriver(Guid driverId, Guid rideId, decimal price)
+    public async Task<bool> SendOfferToDriver(Guid driverId, Guid rideId, decimal price)
     {
         var previouslyRejected = await _dbContext.Offers.AnyAsync(offer =>
             offer.RideId == rideId &&
@@ -82,7 +83,21 @@ public class DriverService : IDriverService
         };
 
         await _dbContext.Offers.AddAsync(offer);
-        await _dbContext.SaveChangesAsync();
+        try
+        {
+            await _dbContext.SaveChangesAsync();
+            return true;
+        }
+        catch (DbUpdateException exception) when (
+            exception.InnerException is SqliteException
+            {
+                SqliteExtendedErrorCode: 2067
+            })
+        {
+            _dbContext.Entry(driver).State = EntityState.Detached;
+            _dbContext.Entry(offer).State = EntityState.Detached;
+            return false;
+        }
     }
 
     public async Task AcceptOffer(Guid offerId)
@@ -187,6 +202,11 @@ public class DriverService : IDriverService
     public async Task<Offer> CompleteRide(Guid rideId, Guid driverId)
     {
         var offer = await GetCurrentOffer(rideId, driverId);
+        if (offer.Status == OfferStatus.COMPLETED)
+        {
+            return offer;
+        }
+
         if (offer.Status != OfferStatus.ACCEPTED)
         {
             throw new InvalidOperationException("Only an accepted ride can be completed.");
@@ -196,13 +216,14 @@ public class DriverService : IDriverService
         if (driver.Status == DriverStatus.BUSY)
         {
             driver.CompleteRide();
-            await _dbContext.SaveChangesAsync();
         }
         else if (driver.Status != DriverStatus.AVAILABLE)
         {
             throw new InvalidOperationException("The driver is not completing the accepted ride.");
         }
 
+        offer.Status = OfferStatus.COMPLETED;
+        await _dbContext.SaveChangesAsync();
         return offer;
     }
 

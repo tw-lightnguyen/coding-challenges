@@ -41,7 +41,10 @@ public sealed class RideCreatedConsumer : RabbitMqConsumer<RideCreatedEvent>
             ?? await matchingService.FindNearestAvailableDriverId(pickup, message.RideId);
         if (driverId.HasValue && currentOffer == null)
         {
-            await driverService.SendOfferToDriver(driverId.Value, message.RideId, 0m);
+            if (!await driverService.SendOfferToDriver(driverId.Value, message.RideId, 0m))
+            {
+                driverId = null;
+            }
         }
 
         await publisher.PublishAsync(

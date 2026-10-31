@@ -62,6 +62,8 @@ await using (var scope = app.Services.CreateAsyncScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
     await dbContext.Database.EnsureCreatedAsync();
+    await dbContext.Database.ExecuteSqlRawAsync(
+        """CREATE UNIQUE INDEX IF NOT EXISTS "IX_Offers_DriverId" ON "Offers" ("DriverId") WHERE "Status" IN (0, 1)""");
 }
 
 // Configure the HTTP request pipeline.
