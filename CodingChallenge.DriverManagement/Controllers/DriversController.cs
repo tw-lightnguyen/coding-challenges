@@ -6,11 +6,11 @@ namespace CodingChallenge.DriverManagement.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class DriverController : ControllerBase
+public class DriversController : ControllerBase
 {
     private readonly IDriverService _driverService;
 
-    public DriverController(IDriverService driverService)
+    public DriversController(IDriverService driverService)
     {
         _driverService = driverService;
     }

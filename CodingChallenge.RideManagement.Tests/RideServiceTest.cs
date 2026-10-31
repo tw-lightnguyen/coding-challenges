@@ -11,11 +11,11 @@ namespace CodingChallenge.RideManagement.Tests;
 
 public class RideServiceTest
 {
-    private DbContextOptions<BaseDbContext> _options;
+    private DbContextOptions<ApplicationDbContext> _options;
 
     public RideServiceTest()
     {
-        _options = new DbContextOptionsBuilder<BaseDbContext>()
+        _options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase(
                 databaseName: Guid.NewGuid().ToString())
             .Options;

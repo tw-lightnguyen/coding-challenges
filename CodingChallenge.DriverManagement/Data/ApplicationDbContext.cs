@@ -7,7 +7,7 @@ namespace CodingChallenge.DriverManagement.Data;
 public class ApplicationDbContext : BaseDbContext
 {
     public ApplicationDbContext(
-        DbContextOptions<BaseDbContext> options)
+        DbContextOptions<ApplicationDbContext> options)
         : base(options)
     {
     }

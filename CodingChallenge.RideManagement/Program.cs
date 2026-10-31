@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using CodingChallenge.RideManagement.Data;
 using CodingChallenge.RideManagement.Services;
 using CodingChallenge.Share.Messaging;
@@ -10,6 +11,8 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddOpenApi();
 
 builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+        options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()))
     .ConfigureApiBehaviorOptions(options =>
     {
         // To preserve the default behavior, capture the original delegate to call later.

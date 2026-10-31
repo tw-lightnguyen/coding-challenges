@@ -11,10 +11,10 @@ namespace CodingChallenge.DriverManagement.Tests;
 
 public class DriverServiceTest
 {
-    private readonly DbContextOptions<BaseDbContext> _options;
+    private readonly DbContextOptions<ApplicationDbContext> _options;
     public DriverServiceTest()
     {
-        _options = new DbContextOptionsBuilder<BaseDbContext>()
+        _options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase(databaseName: "DriverTest")
             .Options;
     }
@@ -182,8 +182,8 @@ public class DriverServiceTest
         Assert.Null(smallerRadiusMatch);
     }
 
-    private static DbContextOptions<BaseDbContext> CreateIsolatedOptions() =>
-        new DbContextOptionsBuilder<BaseDbContext>()
+    private static DbContextOptions<ApplicationDbContext> CreateIsolatedOptions() =>
+        new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .Options;
 
@@ -352,7 +352,7 @@ public class DriverServiceTest
         var databasePath = Path.Combine(
             Path.GetTempPath(),
             $"driver-concurrency-{Guid.NewGuid():N}.db");
-        var options = new DbContextOptionsBuilder<BaseDbContext>()
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseSqlite($"Data Source={databasePath}")
             .Options;
         var driverId = Guid.NewGuid();

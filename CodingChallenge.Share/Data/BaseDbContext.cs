@@ -6,7 +6,7 @@ namespace CodingChallenge.Share.Data;
 public class BaseDbContext : DbContext
 {
     public BaseDbContext(
-        DbContextOptions<BaseDbContext> options)
+        DbContextOptions options)
         : base(options)
     {
     }
