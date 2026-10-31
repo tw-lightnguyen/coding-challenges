@@ -5,7 +5,7 @@ using CodingChallenge.Share.Models;
 
 namespace CodingChallenge.DriverManagement.Services;
 
-public class DriverService
+public class DriverService : IDriverService
 {
     private readonly ApplicationDbContext _dbContext;
 

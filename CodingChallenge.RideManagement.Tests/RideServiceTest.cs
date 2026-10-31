@@ -3,6 +3,7 @@ using CodingChallenge.RideManagement.Dtos;
 using CodingChallenge.RideManagement.Enums;
 using CodingChallenge.RideManagement.Services;
 using CodingChallenge.Share.Data;
+using CodingChallenge.Share.Messaging;
 using CodingChallenge.Share.Models;
 using Microsoft.EntityFrameworkCore;
 
@@ -16,9 +17,14 @@ public class RideServiceTest
     {
         _options = new DbContextOptionsBuilder<BaseDbContext>()
             .UseInMemoryDatabase(
-                databaseName: "RideTest")
+                databaseName: Guid.NewGuid().ToString())
             .Options;
     }
+
+    private static RideService CreateRideService(
+        ApplicationDbContext dbContext,
+        FakeEventPublisher eventPublisher) =>
+        new(dbContext, eventPublisher);
 
     [Fact]
     public async Task CreateRide_WithValidData_ShouldSuccess()
@@ -34,7 +40,8 @@ public class RideServiceTest
         };
 
         using var dbContext = new ApplicationDbContext(_options);
-        var service = new RideService(dbContext);
+        var eventPublisher = new FakeEventPublisher();
+        var service = CreateRideService(dbContext, eventPublisher);
 
         // Act
         var ride = await service.CreateRide(request, idempotencyKey);
@@ -46,6 +53,10 @@ public class RideServiceTest
         Assert.Equal(request.Destination, ride.Destination);
         Assert.Equal(RideStatus.REQUESTED, ride.Status);
         Assert.Null(ride.AssignedDriverId);
+        var publishedEvent = Assert.IsType<RideCreatedEvent>(Assert.Single(eventPublisher.Messages).Message);
+        Assert.Equal(ride.Id, publishedEvent.RideId);
+        Assert.Equal(request.Pickup.Latitude, publishedEvent.PickupLatitude);
+        Assert.Equal(request.Pickup.Longtitude, publishedEvent.PickupLongitude);
     }
 
     [Fact]
@@ -62,7 +73,8 @@ public class RideServiceTest
         };
 
         using var dbContext = new ApplicationDbContext(_options);
-        var service = new RideService(dbContext);
+        var eventPublisher = new FakeEventPublisher();
+        var service = CreateRideService(dbContext, eventPublisher);
 
         // Act
         var ride = await service.CreateRide(request, idempotencyKey);
@@ -76,6 +88,7 @@ public class RideServiceTest
         Assert.Equivalent(ride.Destination, ride2.Destination);
         Assert.Equal(ride.Status, ride2.Status);
         Assert.Equal(ride.PassengerId, ride2.PassengerId);
+        Assert.Equal(2, eventPublisher.Messages.Count);
     }
 
     [Fact]
@@ -97,9 +110,8 @@ public class RideServiceTest
             Pickup = new Coordinate(RandomFloat(-90f, 90f), RandomFloat(-180f, 180f)),
             Destination = new Coordinate(RandomFloat(-90f, 90f), RandomFloat(-180f, 180f))
         };
-
         using var dbContext = new ApplicationDbContext(_options);
-        var service = new RideService(dbContext);
+        var service = CreateRideService(dbContext, new FakeEventPublisher());
 
         // Act
         var ride = await service.CreateRide(request, idempotencyKey);
@@ -118,9 +130,8 @@ public class RideServiceTest
             Pickup = new Coordinate(RandomFloat(-90f, 90f), RandomFloat(-180f, 180f)),
             Destination = new Coordinate(RandomFloat(-90f, 90f), RandomFloat(-180f, 180f))
         };
-
         using var dbContext = new ApplicationDbContext(_options);
-        var service = new RideService(dbContext);
+        var service = CreateRideService(dbContext, new FakeEventPublisher());
 
         // Act
         var createdRide = await service.CreateRide(request, idempotencyKey);
@@ -138,5 +149,19 @@ public class RideServiceTest
     private static float RandomFloat(float min, float max)
     {
         return (Random.Shared.NextSingle() * (max - min)) + min;
+    }
+
+    private sealed class FakeEventPublisher : IEventPublisher
+    {
+        public List<(string RoutingKey, object? Message)> Messages { get; } = [];
+
+        public Task PublishAsync<TEvent>(
+            string routingKey,
+            TEvent message,
+            CancellationToken cancellationToken = default)
+        {
+            Messages.Add((routingKey, message));
+            return Task.CompletedTask;
+        }
     }
 }

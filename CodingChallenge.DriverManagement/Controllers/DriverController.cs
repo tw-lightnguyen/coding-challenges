@@ -8,9 +8,9 @@ namespace CodingChallenge.DriverManagement.Controllers;
 [Route("api/[controller]")]
 public class DriverController : ControllerBase
 {
-    private readonly DriverService _driverService;
+    private readonly IDriverService _driverService;
 
-    public DriverController(DriverService driverService)
+    public DriverController(IDriverService driverService)
     {
         _driverService = driverService;
     }

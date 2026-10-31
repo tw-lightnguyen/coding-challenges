@@ -4,16 +4,21 @@ using CodingChallenge.RideManagement.Dtos;
 using CodingChallenge.RideManagement.Enums;
 using CodingChallenge.RideManagement.Helpers;
 using CodingChallenge.RideManagement.Models;
+using CodingChallenge.Share.Messaging;
 
 namespace CodingChallenge.RideManagement.Services;
 
-public class RideService
+public class RideService : IRideService
 {
     private readonly ApplicationDbContext _dbContext;
+    private readonly IEventPublisher _eventPublisher;
 
-    public RideService(ApplicationDbContext dbContext)
+    public RideService(
+        ApplicationDbContext dbContext,
+        IEventPublisher eventPublisher)
     {
         _dbContext = dbContext;
+        _eventPublisher = eventPublisher;
     }
 
     public async Task<Ride> CreateRide(CreateRideRequest request, Guid idempotencyKey)
@@ -27,7 +32,9 @@ public class RideService
                 throw new Exception("Idempotency key was already used with a different request.");
             }
 
-            return JsonSerializer.Deserialize<Ride>(existing.Response)!;
+            var existingRide = JsonSerializer.Deserialize<Ride>(existing.Response)!;
+            await PublishRideCreated(existingRide);
+            return existingRide;
         }
 
         var ride = new Ride
@@ -49,9 +56,18 @@ public class RideService
         await _dbContext.IdempotencyKeys.AddAsync(idempotencyRecord);
 
         await _dbContext.SaveChangesAsync();
-        
+
+        await PublishRideCreated(result.Entity);
         return result.Entity;
     }
+
+    private Task PublishRideCreated(Ride ride) =>
+        _eventPublisher.PublishAsync(
+            EventRoutingKeys.RideCreated,
+            new RideCreatedEvent(
+                ride.Id,
+                ride.Pickup.Latitude,
+                ride.Pickup.Longtitude));
 
     public async Task<Ride?> GetRideById(Guid rideId)
     {

@@ -5,6 +5,7 @@ using CodingChallenge.DriverManagement.Services;
 using CodingChallenge.Share.Data;
 using CodingChallenge.Share.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace CodingChallenge.DriverManagement.Tests;
 
@@ -17,6 +18,138 @@ public class DriverServiceTest
             .UseInMemoryDatabase(databaseName: "DriverTest")
             .Options;
     }
+
+    [Fact]
+    public async Task FindNearestAvailableDriver_ShouldIgnoreUnavailableAndOutOfRadiusDrivers()
+    {
+        var nearestId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var options = CreateIsolatedOptions();
+        using var dbContext = new ApplicationDbContext(options);
+        dbContext.Drivers.AddRange(
+            new Driver
+            {
+                Id = nearestId,
+                Name = "Nearest",
+                Status = DriverStatus.AVAILABLE,
+                Coordinate = new Coordinate(0, 0.005f)
+            },
+            new Driver
+            {
+                Name = "Farther",
+                Status = DriverStatus.AVAILABLE,
+                Coordinate = new Coordinate(0, 0.01f)
+            },
+            new Driver
+            {
+                Name = "Unavailable",
+                Status = DriverStatus.BUSY,
+                Coordinate = new Coordinate(0, 0.001f)
+            },
+            new Driver
+            {
+                Name = "Outside radius",
+                Status = DriverStatus.AVAILABLE,
+                Coordinate = new Coordinate(0, 0.03f)
+            },
+            new Driver
+            {
+                Name = "Missing location",
+                Status = DriverStatus.AVAILABLE
+            });
+        await dbContext.SaveChangesAsync();
+
+        var matchingService = CreateMatchingService(dbContext);
+        var selectedDriverId = await matchingService.FindNearestAvailableDriverId(new Coordinate(0, 0));
+
+        Assert.Equal(nearestId, selectedDriverId);
+    }
+
+    [Fact]
+    public async Task FindNearestAvailableDriver_WhenEquidistant_ShouldSelectLexicographicallySmallestId()
+    {
+        var smallerId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var largerId = Guid.Parse("00000000-0000-0000-0000-000000000002");
+        var options = CreateIsolatedOptions();
+        using var dbContext = new ApplicationDbContext(options);
+        dbContext.Drivers.AddRange(
+            new Driver
+            {
+                Id = largerId,
+                Name = "Larger id",
+                Status = DriverStatus.AVAILABLE,
+                Coordinate = new Coordinate(0, 0.005f)
+            },
+            new Driver
+            {
+                Id = smallerId,
+                Name = "Smaller id",
+                Status = DriverStatus.AVAILABLE,
+                Coordinate = new Coordinate(0, -0.005f)
+            });
+        await dbContext.SaveChangesAsync();
+
+        var selectedDriverId = await CreateMatchingService(dbContext)
+            .FindNearestAvailableDriverId(new Coordinate(0, 0));
+
+        Assert.Equal(smallerId, selectedDriverId);
+    }
+
+    [Fact]
+    public async Task FindNearestAvailableDriver_WhenNoSuitableDriverExists_ShouldReturnNull()
+    {
+        var options = CreateIsolatedOptions();
+        using var dbContext = new ApplicationDbContext(options);
+        dbContext.Drivers.Add(new Driver
+        {
+            Name = "Outside radius",
+            Status = DriverStatus.AVAILABLE,
+            Coordinate = new Coordinate(0, 0.03f)
+        });
+        await dbContext.SaveChangesAsync();
+
+        var selectedDriverId = await CreateMatchingService(dbContext)
+            .FindNearestAvailableDriverId(new Coordinate(0, 0));
+
+        Assert.Null(selectedDriverId);
+    }
+
+    [Fact]
+    public async Task FindNearestAvailableDriver_ShouldHonorConfiguredRadius()
+    {
+        var options = CreateIsolatedOptions();
+        using var dbContext = new ApplicationDbContext(options);
+        var driver = new Driver
+        {
+            Name = "Within default radius",
+            Status = DriverStatus.AVAILABLE,
+            Coordinate = new Coordinate(0, 0.015f)
+        };
+        dbContext.Drivers.Add(driver);
+        await dbContext.SaveChangesAsync();
+
+        var defaultRadiusMatch = await CreateMatchingService(dbContext, 2)
+            .FindNearestAvailableDriverId(new Coordinate(0, 0));
+        var smallerRadiusMatch = await CreateMatchingService(dbContext, 1.5)
+            .FindNearestAvailableDriverId(new Coordinate(0, 0));
+
+        Assert.Equal(driver.Id, defaultRadiusMatch);
+        Assert.Null(smallerRadiusMatch);
+    }
+
+    private static DbContextOptions<BaseDbContext> CreateIsolatedOptions() =>
+        new DbContextOptionsBuilder<BaseDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+
+    private static DriverMatchingService CreateMatchingService(
+        ApplicationDbContext dbContext,
+        double radiusKilometers = 2) =>
+        new(
+            dbContext,
+            Options.Create(new DriverMatchingOptions
+            {
+                MaxRadiusKilometers = radiusKilometers
+            }));
 
     [Theory]
     [InlineData(true, DriverStatus.AVAILABLE)]

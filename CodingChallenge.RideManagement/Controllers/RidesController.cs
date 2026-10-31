@@ -8,9 +8,9 @@ namespace CodingChallenge.RideManagement.Controllers;
 [Route("[controller]")]
 public class RidesController : ControllerBase
 {
-    private readonly RideService _rideService;
+    private readonly IRideService _rideService;
 
-    public RidesController(RideService rideService)
+    public RidesController(IRideService rideService)
     {
         _rideService = rideService;
     }

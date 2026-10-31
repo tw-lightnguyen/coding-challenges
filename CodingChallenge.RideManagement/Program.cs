@@ -1,4 +1,6 @@
 using CodingChallenge.RideManagement.Data;
+using CodingChallenge.RideManagement.Services;
+using CodingChallenge.Share.Messaging;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -16,7 +18,7 @@ builder.Services.AddControllers()
         options.InvalidModelStateResponseFactory = context =>
         {
             var logger = context.HttpContext.RequestServices
-                                .GetRequiredService<ILogger<Program>>();
+                                .GetRequiredService<ILogger<RideService>>();
 
             // Extract validation errors from ModelState
             var errors = context.ModelState
@@ -35,11 +37,28 @@ builder.Services.AddControllers()
         };
     });
 
+var databasePath = Path.GetFullPath(
+    builder.Configuration["Database:Path"] ??
+    Path.Combine(builder.Environment.ContentRootPath, "data", "Ride.db"));
+Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
+var connectionString = $"Data Source={databasePath}";
+
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseSqlite("Data Source=Ride.db")
+    options.UseSqlite(connectionString)
 );
 
+builder.Services.AddScoped<IRideService, RideService>();
+builder.Services.Configure<RabbitMqOptions>(builder.Configuration.GetSection("RabbitMq"));
+builder.Services.AddSingleton<IEventPublisher, RabbitMqEventPublisher>();
+builder.Services.AddHostedService<DriverMatchedConsumer>();
+
 var app = builder.Build();
+
+await using (var scope = app.Services.CreateAsyncScope())
+{
+    var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+    await dbContext.Database.EnsureCreatedAsync();
+}
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
@@ -47,6 +66,7 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
+app.MapControllers();
 app.UseHttpsRedirection();
 
 app.Run();
