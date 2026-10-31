@@ -183,6 +183,8 @@ public class RideServiceTest
         using var dbContext = new ApplicationDbContext(_options);
         var ride = CreateAssignedRide();
         ride.Status = RideStatus.DRIVER_ASSIGNED;
+        var rejectedDriverId = ride.AssignedDriverId!.Value;
+        var nextDriverId = Guid.NewGuid();
         dbContext.Rides.Add(ride);
         await dbContext.SaveChangesAsync();
         var publisher = new FakeEventPublisher();
@@ -190,13 +192,18 @@ public class RideServiceTest
 
         await service.HandleDriverActionCompleted(new RideDriverActionCompletedEvent(
             ride.Id,
-            ride.AssignedDriverId!.Value,
+            rejectedDriverId,
             RideDriverAction.Reject));
 
         Assert.Equal(RideStatus.MATCHING, ride.Status);
         Assert.Null(ride.AssignedDriverId);
         var message = Assert.IsType<RideCreatedEvent>(Assert.Single(publisher.Messages).Message);
         Assert.Equal(ride.Id, message.RideId);
+
+        await service.HandleDriverMatched(new DriverMatchedEvent(ride.Id, nextDriverId));
+
+        Assert.Equal(RideStatus.DRIVER_ASSIGNED, ride.Status);
+        Assert.Equal(nextDriverId, ride.AssignedDriverId);
     }
 
     [Fact]

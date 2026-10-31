@@ -22,6 +22,7 @@ public class DriverServiceTest
     [Fact]
     public async Task FindNearestAvailableDriver_ShouldIgnoreUnavailableAndOutOfRadiusDrivers()
     {
+        // Arrange
         var nearestId = Guid.Parse("00000000-0000-0000-0000-000000000001");
         var options = CreateIsolatedOptions();
         using var dbContext = new ApplicationDbContext(options);
@@ -59,14 +60,18 @@ public class DriverServiceTest
         await dbContext.SaveChangesAsync();
 
         var matchingService = CreateMatchingService(dbContext);
+
+        // Act
         var selectedDriverId = await matchingService.FindNearestAvailableDriverId(new Coordinate(0, 0));
 
+        // Assert
         Assert.Equal(nearestId, selectedDriverId);
     }
 
     [Fact]
     public async Task FindNearestAvailableDriver_WhenEquidistant_ShouldSelectLexicographicallySmallestId()
     {
+        // Arrange
         var smallerId = Guid.Parse("00000000-0000-0000-0000-000000000001");
         var largerId = Guid.Parse("00000000-0000-0000-0000-000000000002");
         var options = CreateIsolatedOptions();
@@ -88,15 +93,20 @@ public class DriverServiceTest
             });
         await dbContext.SaveChangesAsync();
 
-        var selectedDriverId = await CreateMatchingService(dbContext)
+        var matchingService = CreateMatchingService(dbContext);
+
+        // Act
+        var selectedDriverId = await matchingService
             .FindNearestAvailableDriverId(new Coordinate(0, 0));
 
+        // Assert
         Assert.Equal(smallerId, selectedDriverId);
     }
 
     [Fact]
     public async Task FindNearestAvailableDriver_WhenNoSuitableDriverExists_ShouldReturnNull()
     {
+        // Arrange
         var options = CreateIsolatedOptions();
         using var dbContext = new ApplicationDbContext(options);
         dbContext.Drivers.Add(new Driver
@@ -107,15 +117,20 @@ public class DriverServiceTest
         });
         await dbContext.SaveChangesAsync();
 
-        var selectedDriverId = await CreateMatchingService(dbContext)
+        var matchingService = CreateMatchingService(dbContext);
+
+        // Act
+        var selectedDriverId = await matchingService
             .FindNearestAvailableDriverId(new Coordinate(0, 0));
 
+        // Assert
         Assert.Null(selectedDriverId);
     }
 
     [Fact]
     public async Task FindNearestAvailableDriver_ShouldHonorConfiguredRadius()
     {
+        // Arrange
         var options = CreateIsolatedOptions();
         using var dbContext = new ApplicationDbContext(options);
         var driver = new Driver
@@ -127,11 +142,16 @@ public class DriverServiceTest
         dbContext.Drivers.Add(driver);
         await dbContext.SaveChangesAsync();
 
-        var defaultRadiusMatch = await CreateMatchingService(dbContext, 2)
+        var defaultRadiusMatchingService = CreateMatchingService(dbContext, 2);
+        var smallerRadiusMatchingService = CreateMatchingService(dbContext, 1.5);
+
+        // Act
+        var defaultRadiusMatch = await defaultRadiusMatchingService
             .FindNearestAvailableDriverId(new Coordinate(0, 0));
-        var smallerRadiusMatch = await CreateMatchingService(dbContext, 1.5)
+        var smallerRadiusMatch = await smallerRadiusMatchingService
             .FindNearestAvailableDriverId(new Coordinate(0, 0));
 
+        // Assert
         Assert.Equal(driver.Id, defaultRadiusMatch);
         Assert.Null(smallerRadiusMatch);
     }
@@ -182,6 +202,7 @@ public class DriverServiceTest
     [Fact]
     public async Task UpdateDriverLocation_ShouldStoreLatestLocation()
     {
+        // Arrange
         var driverId = Guid.NewGuid();
         using (var dbContext = new ApplicationDbContext(_options))
         {
@@ -193,14 +214,23 @@ public class DriverServiceTest
                 Coordinate = new Coordinate(1, 2)
             });
             await dbContext.SaveChangesAsync();
-
-            var service = new DriverService(dbContext);
-            Assert.True(await service.UpdateDriverLocation(driverId, 10, 20));
-            Assert.True(await service.UpdateDriverLocation(driverId, -30, -40));
         }
 
+        // Act
+        bool firstUpdateResult;
+        bool secondUpdateResult;
+        using (var dbContext = new ApplicationDbContext(_options))
+        {
+            var service = new DriverService(dbContext);
+            firstUpdateResult = await service.UpdateDriverLocation(driverId, 10, 20);
+            secondUpdateResult = await service.UpdateDriverLocation(driverId, -30, -40);
+        }
+
+        // Assert
         using var verifyContext = new ApplicationDbContext(_options);
         var updatedDriver = await verifyContext.Drivers.FindAsync(driverId);
+        Assert.True(firstUpdateResult);
+        Assert.True(secondUpdateResult);
         Assert.NotNull(updatedDriver?.Coordinate);
         Assert.Equal(-30, updatedDriver.Coordinate.Latitude);
         Assert.Equal(-40, updatedDriver.Coordinate.Longtitude);
@@ -213,32 +243,48 @@ public class DriverServiceTest
     [InlineData(0, 181)]
     public async Task UpdateDriverLocation_ShouldRejectInvalidCoordinates(float latitude, float longitude)
     {
+        // Arrange
         using var dbContext = new ApplicationDbContext(_options);
         var service = new DriverService(dbContext);
 
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+        // Act
+        var exception = await Record.ExceptionAsync(
             () => service.UpdateDriverLocation(Guid.NewGuid(), latitude, longitude));
+
+        // Assert
+        Assert.IsType<ArgumentOutOfRangeException>(exception);
     }
 
     [Fact]
     public async Task UpdateDriverLocation_ShouldRejectNonFiniteCoordinates()
     {
+        // Arrange
         using var dbContext = new ApplicationDbContext(_options);
         var service = new DriverService(dbContext);
 
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+        // Act
+        var latitudeException = await Record.ExceptionAsync(
             () => service.UpdateDriverLocation(Guid.NewGuid(), float.NaN, 0));
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+        var longitudeException = await Record.ExceptionAsync(
             () => service.UpdateDriverLocation(Guid.NewGuid(), 0, float.PositiveInfinity));
+
+        // Assert
+        Assert.IsType<ArgumentOutOfRangeException>(latitudeException);
+        Assert.IsType<ArgumentOutOfRangeException>(longitudeException);
     }
 
     [Fact]
     public async Task UpdateDriverLocation_ShouldReturnFalseForMissingDriver()
     {
+        // Arrange
         using var dbContext = new ApplicationDbContext(_options);
         var service = new DriverService(dbContext);
 
-        Assert.False(await service.UpdateDriverLocation(Guid.NewGuid(), 0, 0));
+        // Act
+        var result = await service.UpdateDriverLocation(Guid.NewGuid(), 0, 0);
+
+        // Assert
+        Assert.False(result);
     }
 
     [Fact]
@@ -296,8 +342,12 @@ public class DriverServiceTest
         var rideId = Guid.NewGuid();
         decimal price = 100.0m;
 
-        // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(async () => await service.SendOfferToDriver(driver.Id, rideId, price));
+        // Act
+        var exception = await Record.ExceptionAsync(
+            () => service.SendOfferToDriver(driver.Id, rideId, price));
+
+        // Assert
+        Assert.IsType<InvalidOperationException>(exception);
     }
 
     [Theory]
@@ -352,40 +402,57 @@ public class DriverServiceTest
     [Fact]
     public async Task RejectOffer_ShouldExcludeDriverFromTheSameRideMatching()
     {
+        // Arrange
         var options = CreateIsolatedOptions();
         using var dbContext = new ApplicationDbContext(options);
-        var rejectedDriver = new Driver
+        var firstDriver = new Driver
         {
-            Name = "Rejected",
+            Name = "First",
             Status = DriverStatus.AVAILABLE,
             Coordinate = new Coordinate(0, 0.001f)
         };
-        var nextDriver = new Driver
+        var secondDriver = new Driver
         {
-            Name = "Next",
+            Name = "Second",
             Status = DriverStatus.AVAILABLE,
-            Coordinate = new Coordinate(0, 0.005f)
+            Coordinate = new Coordinate(0, 0.002f)
         };
-        dbContext.Drivers.AddRange(rejectedDriver, nextDriver);
+        dbContext.Drivers.AddRange(firstDriver, secondDriver);
         await dbContext.SaveChangesAsync();
 
         var driverService = new DriverService(dbContext);
         var rideId = Guid.NewGuid();
-        await driverService.SendOfferToDriver(rejectedDriver.Id, rideId, 0m);
-        await driverService.RejectOffer(rideId, rejectedDriver.Id);
-        await Assert.ThrowsAsync<InvalidOperationException>(
-            () => driverService.SendOfferToDriver(rejectedDriver.Id, rideId, 0m));
 
-        var selectedDriverId = await CreateMatchingService(dbContext)
+        // Act
+        await driverService.SendOfferToDriver(firstDriver.Id, rideId, 0m);
+        await driverService.RejectOffer(rideId, firstDriver.Id);
+
+        var matchingService = CreateMatchingService(dbContext);
+        var secondDriverId = await matchingService
             .FindNearestAvailableDriverId(new Coordinate(0, 0), rideId);
+        await driverService.SendOfferToDriver(secondDriver.Id, rideId, 0m);
+        await driverService.RejectOffer(rideId, secondDriver.Id);
 
-        Assert.Equal(nextDriver.Id, selectedDriverId);
-        Assert.Equal(DriverStatus.AVAILABLE, rejectedDriver.Status);
+        var noEligibleDriverId = await matchingService
+            .FindNearestAvailableDriverId(new Coordinate(0, 0), rideId);
+        var driverForAnotherRideId = await matchingService
+            .FindNearestAvailableDriverId(new Coordinate(0, 0), Guid.NewGuid());
+        var duplicateOfferException = await Record.ExceptionAsync(
+            () => driverService.SendOfferToDriver(firstDriver.Id, rideId, 0m));
+
+        // Assert
+        Assert.Equal(secondDriver.Id, secondDriverId);
+        Assert.Null(noEligibleDriverId);
+        Assert.Equal(firstDriver.Id, driverForAnotherRideId);
+        Assert.IsType<InvalidOperationException>(duplicateOfferException);
+        Assert.Equal(DriverStatus.AVAILABLE, firstDriver.Status);
+        Assert.Equal(DriverStatus.AVAILABLE, secondDriver.Status);
     }
 
     [Fact]
     public async Task ExpirePendingOffers_ShouldReleaseDriverAndMarkOfferTimedOut()
     {
+        // Arrange
         var options = CreateIsolatedOptions();
         using var dbContext = new ApplicationDbContext(options);
         var driver = new Driver
@@ -400,12 +467,14 @@ public class DriverServiceTest
             dbContext,
             Options.Create(new RideOfferOptions { ResponseTimeoutSeconds = 1 }));
         await service.SendOfferToDriver(driver.Id, Guid.NewGuid(), 0m);
-        var offer = Assert.Single(dbContext.Offers);
+        var offer = dbContext.Offers.First(offer => offer.DriverId == driver.Id);
         offer.CreatedDateTime = DateTime.UtcNow.AddSeconds(-2);
         await dbContext.SaveChangesAsync();
 
+        // Act
         var expiredOffers = await service.ExpirePendingOffers();
 
+        // Assert
         Assert.Contains(offer, expiredOffers);
         Assert.Equal(OfferStatus.TIMED_OUT, offer.Status);
         Assert.Equal(DriverStatus.AVAILABLE, driver.Status);
@@ -414,6 +483,7 @@ public class DriverServiceTest
     [Fact]
     public async Task CancelOfferAndCompleteRide_ShouldReleaseTheDriver()
     {
+        // Arrange
         var options = CreateIsolatedOptions();
         using var dbContext = new ApplicationDbContext(options);
         var driver = new Driver
@@ -426,26 +496,30 @@ public class DriverServiceTest
 
         var service = new DriverService(dbContext);
         var cancelledRideId = Guid.NewGuid();
+
+        // Act
         await service.SendOfferToDriver(driver.Id, cancelledRideId, 0m);
         await service.CancelOffer(cancelledRideId, driver.Id);
-        var cancelledOffer = Assert.Single(dbContext.Offers.Where(offer => offer.RideId == cancelledRideId));
-        Assert.Equal(OfferStatus.CANCELLED, cancelledOffer.Status);
-        Assert.Equal(DriverStatus.AVAILABLE, driver.Status);
-
         var acceptedRideId = Guid.NewGuid();
         await service.SendOfferToDriver(driver.Id, acceptedRideId, 0m);
         await service.AcceptOffer(acceptedRideId, driver.Id);
-        var acceptedOffer = Assert.Single(dbContext.Offers.Where(offer => offer.RideId == acceptedRideId));
-        Assert.Equal(OfferStatus.ACCEPTED, acceptedOffer.Status);
-        Assert.Equal(DriverStatus.BUSY, driver.Status);
-
+        var statusAfterAcceptingRide = driver.Status;
         await service.CompleteRide(acceptedRideId, driver.Id);
+
+        var cancelledOffer = dbContext.Offers.Single(offer => offer.RideId == cancelledRideId);
+        var acceptedOffer = dbContext.Offers.Single(offer => offer.RideId == acceptedRideId);
+
+        // Assert
+        Assert.Equal(OfferStatus.CANCELLED, cancelledOffer.Status);
+        Assert.Equal(OfferStatus.ACCEPTED, acceptedOffer.Status);
+        Assert.Equal(DriverStatus.BUSY, statusAfterAcceptingRide);
         Assert.Equal(DriverStatus.AVAILABLE, driver.Status);
     }
 
     [Fact]
     public async Task CancelPendingOffers_ShouldReleaseEveryDriverOnTheRide()
     {
+        // Arrange
         var options = CreateIsolatedOptions();
         using var dbContext = new ApplicationDbContext(options);
         var drivers = new[]
@@ -463,8 +537,10 @@ public class DriverServiceTest
             await service.SendOfferToDriver(driver.Id, rideId, 0m);
         }
 
+        // Act
         await service.CancelPendingOffers(rideId);
 
+        // Assert
         Assert.All(drivers, driver => Assert.Equal(DriverStatus.AVAILABLE, driver.Status));
         Assert.All(
             dbContext.Offers.Where(offer => offer.RideId == rideId),
