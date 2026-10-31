@@ -3,7 +3,6 @@ using CodingChallenge.DriverManagement.Enums;
 using CodingChallenge.DriverManagement.Models;
 using CodingChallenge.DriverManagement.Services;
 using CodingChallenge.Share.Data;
-using CodingChallenge.Share.Models;
 using Microsoft.EntityFrameworkCore;
 
 namespace CodingChallenge.DriverManagement.Tests;
@@ -29,8 +28,7 @@ public class DriverServiceTest
         {
             Id = Guid.NewGuid(),
             Name = "John Doe",
-            Status = DriverStatus.OFFLINE,
-            Coordinate = new Coordinate(0, 0)
+            Status = DriverStatus.OFFLINE
         };
 
         dbContext.Drivers.Add(driver);
@@ -56,8 +54,7 @@ public class DriverServiceTest
         {
             Id = Guid.NewGuid(),
             Name = "Jane Doe",
-            Status = DriverStatus.AVAILABLE,
-            Coordinate = new Coordinate(0, 0)
+            Status = DriverStatus.AVAILABLE
         };
 
         dbContext.Drivers.Add(driver);
@@ -93,8 +90,7 @@ public class DriverServiceTest
         {
             Id = Guid.NewGuid(),
             Name = "Bob Smith",
-            Status = unavailableStatus,
-            Coordinate = new Coordinate(0, 0)
+            Status = unavailableStatus
         };
 
         dbContext.Drivers.Add(driver);
@@ -119,8 +115,7 @@ public class DriverServiceTest
         {
             Id = Guid.NewGuid(),
             Name = "Alice Smith",
-            Status = DriverStatus.OFFERED,
-            Coordinate = new Coordinate(0, 0)
+            Status = DriverStatus.OFFERED
         };
 
         var offer = new Offer

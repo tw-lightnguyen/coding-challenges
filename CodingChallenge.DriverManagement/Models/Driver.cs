@@ -8,7 +8,7 @@ public class Driver : BaseModel
     public required string Name { get; set; }
     public DriverStatus Status { get; set; }
 
-    public required Coordinate Coordinate { get; set; }
+    public Coordinate? Coordinate { get; set; }
 
     public void GoOffline()
     {
