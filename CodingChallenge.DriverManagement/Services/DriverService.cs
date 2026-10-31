@@ -1,6 +1,7 @@
 using CodingChallenge.DriverManagement.Data;
 using CodingChallenge.DriverManagement.Enums;
 using CodingChallenge.DriverManagement.Models;
+using CodingChallenge.Share.Models;
 
 namespace CodingChallenge.DriverManagement.Services;
 
@@ -23,6 +24,20 @@ public class DriverService
 
         driver.Status = isAvailable ? DriverStatus.AVAILABLE : DriverStatus.OFFLINE;
         await _dbContext.SaveChangesAsync();
+    }
+
+    public async Task<bool> UpdateDriverLocation(Guid driverId, float latitude, float longitude)
+    {
+        var coordinate = new Coordinate(latitude, longitude);
+        var driver = await _dbContext.Drivers.FindAsync(driverId);
+        if (driver == null)
+        {
+            return false;
+        }
+
+        driver.Coordinate = coordinate;
+        await _dbContext.SaveChangesAsync();
+        return true;
     }
 
     public async Task SendOfferToDriver(Guid driverId, Guid rideId, decimal price)

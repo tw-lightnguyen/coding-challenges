@@ -3,6 +3,7 @@ using CodingChallenge.DriverManagement.Enums;
 using CodingChallenge.DriverManagement.Models;
 using CodingChallenge.DriverManagement.Services;
 using CodingChallenge.Share.Data;
+using CodingChallenge.Share.Models;
 using Microsoft.EntityFrameworkCore;
 
 namespace CodingChallenge.DriverManagement.Tests;
@@ -43,6 +44,68 @@ public class DriverServiceTest
         var updatedDriver = dbContext.Drivers.Find(driver.Id);
         Assert.NotNull(updatedDriver);
         Assert.Equal(expectedStatus, updatedDriver.Status);
+    }
+
+    [Fact]
+    public async Task UpdateDriverLocation_ShouldStoreLatestLocation()
+    {
+        var driverId = Guid.NewGuid();
+        using (var dbContext = new ApplicationDbContext(_options))
+        {
+            dbContext.Drivers.Add(new Driver
+            {
+                Id = driverId,
+                Name = "Location Test",
+                Status = DriverStatus.AVAILABLE,
+                Coordinate = new Coordinate(1, 2)
+            });
+            await dbContext.SaveChangesAsync();
+
+            var service = new DriverService(dbContext);
+            Assert.True(await service.UpdateDriverLocation(driverId, 10, 20));
+            Assert.True(await service.UpdateDriverLocation(driverId, -30, -40));
+        }
+
+        using var verifyContext = new ApplicationDbContext(_options);
+        var updatedDriver = await verifyContext.Drivers.FindAsync(driverId);
+        Assert.NotNull(updatedDriver?.Coordinate);
+        Assert.Equal(-30, updatedDriver.Coordinate.Latitude);
+        Assert.Equal(-40, updatedDriver.Coordinate.Longtitude);
+    }
+
+    [Theory]
+    [InlineData(-91, 0)]
+    [InlineData(91, 0)]
+    [InlineData(0, -181)]
+    [InlineData(0, 181)]
+    public async Task UpdateDriverLocation_ShouldRejectInvalidCoordinates(float latitude, float longitude)
+    {
+        using var dbContext = new ApplicationDbContext(_options);
+        var service = new DriverService(dbContext);
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => service.UpdateDriverLocation(Guid.NewGuid(), latitude, longitude));
+    }
+
+    [Fact]
+    public async Task UpdateDriverLocation_ShouldRejectNonFiniteCoordinates()
+    {
+        using var dbContext = new ApplicationDbContext(_options);
+        var service = new DriverService(dbContext);
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => service.UpdateDriverLocation(Guid.NewGuid(), float.NaN, 0));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => service.UpdateDriverLocation(Guid.NewGuid(), 0, float.PositiveInfinity));
+    }
+
+    [Fact]
+    public async Task UpdateDriverLocation_ShouldReturnFalseForMissingDriver()
+    {
+        using var dbContext = new ApplicationDbContext(_options);
+        var service = new DriverService(dbContext);
+
+        Assert.False(await service.UpdateDriverLocation(Guid.NewGuid(), 0, 0));
     }
 
     [Fact]

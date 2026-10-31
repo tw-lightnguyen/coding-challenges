@@ -1,3 +1,4 @@
+using CodingChallenge.DriverManagement.Dtos;
 using CodingChallenge.DriverManagement.Services;
 using Microsoft.AspNetCore.Mvc;
 
@@ -19,5 +20,18 @@ public class DriverController : ControllerBase
     {
         await _driverService.UpdateDriverAvailability(driverId, isAvailable);
         return Ok();
+    }
+
+    [HttpPut("{driverId:guid}/location")]
+    public async Task<IActionResult> UpdateDriverLocation(
+        Guid driverId,
+        [FromBody] UpdateDriverLocationRequest request)
+    {
+        var updated = await _driverService.UpdateDriverLocation(
+            driverId,
+            request.Latitude,
+            request.Longitude);
+
+        return updated ? NoContent() : NotFound();
     }
 }

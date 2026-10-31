@@ -16,9 +16,9 @@ public class Coordinate
         get => _latitude;
         set
         {
-            if (value > 90f || value < -90f)
+            if (!float.IsFinite(value) || value > 90f || value < -90f)
             {
-                throw new ArgumentOutOfRangeException(nameof(Latitude), "Latitude must be between -90 and 90");
+                throw new ArgumentOutOfRangeException(nameof(Latitude), "Latitude must be a finite value between -90 and 90");
             }
 
             _latitude = value;
@@ -29,9 +29,9 @@ public class Coordinate
         get => _longtitude;
         set
         {
-            if (value > 180f || value < -180f)
+            if (!float.IsFinite(value) || value > 180f || value < -180f)
             {
-                throw new ArgumentOutOfRangeException(nameof(Longtitude), "Longtitude must be between -180 and 180");
+                throw new ArgumentOutOfRangeException(nameof(Longtitude), "Longtitude must be a finite value between -180 and 180");
             }
 
             _longtitude = value;
