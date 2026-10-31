@@ -348,4 +348,126 @@ public class DriverServiceTest
         Assert.NotNull(updatedDriver);
         Assert.Equal(expectedDriverStatus, updatedDriver.Status);
     }
+
+    [Fact]
+    public async Task RejectOffer_ShouldExcludeDriverFromTheSameRideMatching()
+    {
+        var options = CreateIsolatedOptions();
+        using var dbContext = new ApplicationDbContext(options);
+        var rejectedDriver = new Driver
+        {
+            Name = "Rejected",
+            Status = DriverStatus.AVAILABLE,
+            Coordinate = new Coordinate(0, 0.001f)
+        };
+        var nextDriver = new Driver
+        {
+            Name = "Next",
+            Status = DriverStatus.AVAILABLE,
+            Coordinate = new Coordinate(0, 0.005f)
+        };
+        dbContext.Drivers.AddRange(rejectedDriver, nextDriver);
+        await dbContext.SaveChangesAsync();
+
+        var driverService = new DriverService(dbContext);
+        var rideId = Guid.NewGuid();
+        await driverService.SendOfferToDriver(rejectedDriver.Id, rideId, 0m);
+        await driverService.RejectOffer(rideId, rejectedDriver.Id);
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => driverService.SendOfferToDriver(rejectedDriver.Id, rideId, 0m));
+
+        var selectedDriverId = await CreateMatchingService(dbContext)
+            .FindNearestAvailableDriverId(new Coordinate(0, 0), rideId);
+
+        Assert.Equal(nextDriver.Id, selectedDriverId);
+        Assert.Equal(DriverStatus.AVAILABLE, rejectedDriver.Status);
+    }
+
+    [Fact]
+    public async Task ExpirePendingOffers_ShouldReleaseDriverAndMarkOfferTimedOut()
+    {
+        var options = CreateIsolatedOptions();
+        using var dbContext = new ApplicationDbContext(options);
+        var driver = new Driver
+        {
+            Name = "Timeout",
+            Status = DriverStatus.AVAILABLE
+        };
+        dbContext.Drivers.Add(driver);
+        await dbContext.SaveChangesAsync();
+
+        var service = new DriverService(
+            dbContext,
+            Options.Create(new RideOfferOptions { ResponseTimeoutSeconds = 1 }));
+        await service.SendOfferToDriver(driver.Id, Guid.NewGuid(), 0m);
+        var offer = Assert.Single(dbContext.Offers);
+        offer.CreatedDateTime = DateTime.UtcNow.AddSeconds(-2);
+        await dbContext.SaveChangesAsync();
+
+        var expiredOffers = await service.ExpirePendingOffers();
+
+        Assert.Contains(offer, expiredOffers);
+        Assert.Equal(OfferStatus.TIMED_OUT, offer.Status);
+        Assert.Equal(DriverStatus.AVAILABLE, driver.Status);
+    }
+
+    [Fact]
+    public async Task CancelOfferAndCompleteRide_ShouldReleaseTheDriver()
+    {
+        var options = CreateIsolatedOptions();
+        using var dbContext = new ApplicationDbContext(options);
+        var driver = new Driver
+        {
+            Name = "Lifecycle",
+            Status = DriverStatus.AVAILABLE
+        };
+        dbContext.Drivers.Add(driver);
+        await dbContext.SaveChangesAsync();
+
+        var service = new DriverService(dbContext);
+        var cancelledRideId = Guid.NewGuid();
+        await service.SendOfferToDriver(driver.Id, cancelledRideId, 0m);
+        await service.CancelOffer(cancelledRideId, driver.Id);
+        var cancelledOffer = Assert.Single(dbContext.Offers.Where(offer => offer.RideId == cancelledRideId));
+        Assert.Equal(OfferStatus.CANCELLED, cancelledOffer.Status);
+        Assert.Equal(DriverStatus.AVAILABLE, driver.Status);
+
+        var acceptedRideId = Guid.NewGuid();
+        await service.SendOfferToDriver(driver.Id, acceptedRideId, 0m);
+        await service.AcceptOffer(acceptedRideId, driver.Id);
+        var acceptedOffer = Assert.Single(dbContext.Offers.Where(offer => offer.RideId == acceptedRideId));
+        Assert.Equal(OfferStatus.ACCEPTED, acceptedOffer.Status);
+        Assert.Equal(DriverStatus.BUSY, driver.Status);
+
+        await service.CompleteRide(acceptedRideId, driver.Id);
+        Assert.Equal(DriverStatus.AVAILABLE, driver.Status);
+    }
+
+    [Fact]
+    public async Task CancelPendingOffers_ShouldReleaseEveryDriverOnTheRide()
+    {
+        var options = CreateIsolatedOptions();
+        using var dbContext = new ApplicationDbContext(options);
+        var drivers = new[]
+        {
+            new Driver { Name = "First", Status = DriverStatus.AVAILABLE },
+            new Driver { Name = "Second", Status = DriverStatus.AVAILABLE }
+        };
+        dbContext.Drivers.AddRange(drivers);
+        await dbContext.SaveChangesAsync();
+
+        var rideId = Guid.NewGuid();
+        var service = new DriverService(dbContext);
+        foreach (var driver in drivers)
+        {
+            await service.SendOfferToDriver(driver.Id, rideId, 0m);
+        }
+
+        await service.CancelPendingOffers(rideId);
+
+        Assert.All(drivers, driver => Assert.Equal(DriverStatus.AVAILABLE, driver.Status));
+        Assert.All(
+            dbContext.Offers.Where(offer => offer.RideId == rideId),
+            offer => Assert.Equal(OfferStatus.CANCELLED, offer.Status));
+    }
 }

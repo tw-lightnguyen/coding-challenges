@@ -1,4 +1,5 @@
 using CodingChallenge.RideManagement.Data;
+using CodingChallenge.RideManagement.Enums;
 using CodingChallenge.Share.Messaging;
 using Microsoft.Extensions.Options;
 
@@ -32,7 +33,22 @@ public sealed class DriverMatchedConsumer : RabbitMqConsumer<DriverMatchedEvent>
             throw new InvalidOperationException($"Ride {message.RideId} was not found.");
         }
 
-        ride.AssignedDriverId = message.DriverId;
+        if (ride.Status is RideStatus.CANCELLED or RideStatus.COMPLETED or RideStatus.DRIVER_ASSIGNED)
+        {
+            return;
+        }
+
+        if (message.DriverId.HasValue)
+        {
+            ride.AssignedDriverId = message.DriverId;
+            ride.Status = RideStatus.MATCHING;
+        }
+        else
+        {
+            ride.AssignedDriverId = null;
+            ride.Status = RideStatus.MATCHING;
+        }
+
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 }

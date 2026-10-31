@@ -13,7 +13,12 @@ public static class RabbitMqTopology
             durable: true);
 
         DeclareQueue(channel, "driver-management.ride-created", EventRoutingKeys.RideCreated);
+        DeclareQueue(channel, "driver-management.ride-driver-action", EventRoutingKeys.RideDriverAction);
         DeclareQueue(channel, "ride-management.driver-matched", EventRoutingKeys.DriverMatched);
+        DeclareQueue(
+            channel,
+            "ride-management.ride-driver-action-completed",
+            EventRoutingKeys.RideDriverActionCompleted);
     }
 
     public static void DeclareQueue(IModel channel, string queueName, string routingKey)

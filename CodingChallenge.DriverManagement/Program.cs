@@ -49,9 +49,12 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 builder.Services.AddScoped<IDriverService, DriverService>();
 builder.Services.Configure<RabbitMqOptions>(builder.Configuration.GetSection("RabbitMq"));
 builder.Services.Configure<DriverMatchingOptions>(builder.Configuration.GetSection("DriverMatching"));
+builder.Services.Configure<RideOfferOptions>(builder.Configuration.GetSection("RideOffer"));
 builder.Services.AddSingleton<IEventPublisher, RabbitMqEventPublisher>();
 builder.Services.AddScoped<DriverMatchingService>();
 builder.Services.AddHostedService<RideCreatedConsumer>();
+builder.Services.AddHostedService<RideDriverActionConsumer>();
+builder.Services.AddHostedService<OfferExpirationService>();
 
 var app = builder.Build();
 

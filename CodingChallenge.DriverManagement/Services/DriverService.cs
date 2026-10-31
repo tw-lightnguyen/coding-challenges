@@ -2,16 +2,30 @@ using CodingChallenge.DriverManagement.Data;
 using CodingChallenge.DriverManagement.Enums;
 using CodingChallenge.DriverManagement.Models;
 using CodingChallenge.Share.Models;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace CodingChallenge.DriverManagement.Services;
 
 public class DriverService : IDriverService
 {
     private readonly ApplicationDbContext _dbContext;
+    private readonly TimeSpan _offerResponseTimeout;
 
-    public DriverService(ApplicationDbContext dbContext)
+    public DriverService(
+        ApplicationDbContext dbContext,
+        IOptions<RideOfferOptions>? options = null)
     {
         _dbContext = dbContext;
+        var timeoutSeconds = options?.Value.ResponseTimeoutSeconds ?? 30;
+        if (timeoutSeconds <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                "The offer response timeout must be greater than zero.");
+        }
+
+        _offerResponseTimeout = TimeSpan.FromSeconds(timeoutSeconds);
     }
 
     public async Task UpdateDriverAvailability(Guid driverId, bool isAvailable)
@@ -42,6 +56,15 @@ public class DriverService : IDriverService
 
     public async Task SendOfferToDriver(Guid driverId, Guid rideId, decimal price)
     {
+        var previouslyRejected = await _dbContext.Offers.AnyAsync(offer =>
+            offer.RideId == rideId &&
+            offer.DriverId == driverId &&
+            (offer.Status == OfferStatus.REJECTED || offer.Status == OfferStatus.TIMED_OUT));
+        if (previouslyRejected)
+        {
+            throw new InvalidOperationException("A driver cannot be offered the same ride more than once.");
+        }
+
         var driver = await _dbContext.Drivers.FindAsync(driverId);
         if (driver == null)
         {
@@ -70,15 +93,13 @@ public class DriverService : IDriverService
             throw new Exception("Offer not found.");
         }
 
-        var driver = await _dbContext.Drivers.FindAsync(offer.DriverId);
-        if (driver != null)
+        var currentOffer = await GetCurrentOffer(offer.RideId, offer.DriverId);
+        if (currentOffer.Id != offer.Id)
         {
-            driver.AcceptOffer();
+            throw new InvalidOperationException("Only the current offer can be accepted.");
         }
 
-        offer.Status = OfferStatus.ACCEPTED;
-
-        await _dbContext.SaveChangesAsync();
+        await AcceptOffer(offer.RideId, offer.DriverId);
     }
 
     public async Task RejectOffer(Guid offerId)
@@ -89,14 +110,174 @@ public class DriverService : IDriverService
             throw new Exception("Offer not found.");
         }
 
-        var driver = await _dbContext.Drivers.FindAsync(offer.DriverId);
-        if (driver != null)
+        var currentOffer = await GetCurrentOffer(offer.RideId, offer.DriverId);
+        if (currentOffer.Id != offer.Id)
         {
-            driver.Status = DriverStatus.AVAILABLE;
+            throw new InvalidOperationException("Only the current offer can be rejected.");
         }
 
-        offer.Status = OfferStatus.REJECTED;
+        await RejectOffer(offer.RideId, offer.DriverId);
+    }
 
+    public async Task<Offer> AcceptOffer(Guid rideId, Guid driverId)
+    {
+        var offer = await GetCurrentOffer(rideId, driverId);
+        if (offer.Status == OfferStatus.ACCEPTED)
+        {
+            return offer;
+        }
+
+        EnsurePending(offer);
+        var driver = await GetDriver(offer.DriverId);
+        driver.AcceptOffer();
+        offer.Status = OfferStatus.ACCEPTED;
         await _dbContext.SaveChangesAsync();
+        return offer;
+    }
+
+    public async Task<Offer> RejectOffer(Guid rideId, Guid driverId, bool timedOut = false)
+    {
+        var offer = await GetCurrentOffer(rideId, driverId);
+        var resolvedStatus = timedOut ? OfferStatus.TIMED_OUT : OfferStatus.REJECTED;
+        if (offer.Status == resolvedStatus)
+        {
+            return offer;
+        }
+
+        EnsurePending(offer);
+        var driver = await GetDriver(offer.DriverId);
+        if (driver.Status != DriverStatus.OFFERED)
+        {
+            throw new InvalidOperationException("The driver does not hold a pending offer.");
+        }
+
+        driver.RejectOffer();
+        offer.Status = resolvedStatus;
+        await _dbContext.SaveChangesAsync();
+        return offer;
+    }
+
+    public async Task<Offer> CancelOffer(Guid rideId, Guid driverId)
+    {
+        var offer = await GetCurrentOffer(rideId, driverId);
+        if (offer.Status == OfferStatus.CANCELLED)
+        {
+            return offer;
+        }
+
+        var driver = await GetDriver(offer.DriverId);
+        if (offer.Status == OfferStatus.PENDING && driver.Status == DriverStatus.OFFERED)
+        {
+            driver.CancelOffer();
+        }
+        else if (offer.Status == OfferStatus.ACCEPTED && driver.Status == DriverStatus.BUSY)
+        {
+            driver.CompleteRide();
+        }
+        else
+        {
+            throw new InvalidOperationException("The offer cannot be cancelled in its current state.");
+        }
+
+        offer.Status = OfferStatus.CANCELLED;
+        await _dbContext.SaveChangesAsync();
+        return offer;
+    }
+
+    public async Task<Offer> CompleteRide(Guid rideId, Guid driverId)
+    {
+        var offer = await GetCurrentOffer(rideId, driverId);
+        if (offer.Status != OfferStatus.ACCEPTED)
+        {
+            throw new InvalidOperationException("Only an accepted ride can be completed.");
+        }
+
+        var driver = await GetDriver(offer.DriverId);
+        if (driver.Status == DriverStatus.BUSY)
+        {
+            driver.CompleteRide();
+            await _dbContext.SaveChangesAsync();
+        }
+        else if (driver.Status != DriverStatus.AVAILABLE)
+        {
+            throw new InvalidOperationException("The driver is not completing the accepted ride.");
+        }
+
+        return offer;
+    }
+
+    public async Task CancelPendingOffers(Guid rideId)
+    {
+        var offers = await _dbContext.Offers
+            .Where(offer => offer.RideId == rideId && offer.Status == OfferStatus.PENDING)
+            .ToListAsync();
+
+        foreach (var offer in offers)
+        {
+            var driver = await _dbContext.Drivers.FindAsync(offer.DriverId);
+            if (driver?.Status == DriverStatus.OFFERED)
+            {
+                driver.CancelOffer();
+            }
+
+            offer.Status = OfferStatus.CANCELLED;
+        }
+
+        if (offers.Count > 0)
+        {
+            await _dbContext.SaveChangesAsync();
+        }
+    }
+
+    public async Task<IReadOnlyList<Offer>> ExpirePendingOffers()
+    {
+        var expiryTime = DateTime.UtcNow - _offerResponseTimeout;
+        var expiredOffers = await _dbContext.Offers
+            .Where(offer =>
+                offer.Status == OfferStatus.PENDING &&
+                offer.CreatedDateTime <= expiryTime)
+            .ToListAsync();
+
+        foreach (var offer in expiredOffers)
+        {
+            var driver = await _dbContext.Drivers.FindAsync(offer.DriverId);
+            if (driver?.Status == DriverStatus.OFFERED)
+            {
+                driver.RejectOffer();
+            }
+
+            offer.Status = OfferStatus.TIMED_OUT;
+        }
+
+        if (expiredOffers.Count > 0)
+        {
+            await _dbContext.SaveChangesAsync();
+        }
+
+        return expiredOffers;
+    }
+
+    private async Task<Offer> GetCurrentOffer(Guid rideId, Guid driverId)
+    {
+        var offer = await _dbContext.Offers
+            .Where(candidate => candidate.RideId == rideId && candidate.DriverId == driverId)
+            .OrderByDescending(candidate => candidate.CreatedDateTime)
+            .ThenByDescending(candidate => candidate.Id)
+            .FirstOrDefaultAsync();
+        return offer ?? throw new InvalidOperationException("The driver has no offer for this ride.");
+    }
+
+    private async Task<Driver> GetDriver(Guid driverId)
+    {
+        return await _dbContext.Drivers.FindAsync(driverId)
+            ?? throw new InvalidOperationException("The driver for this offer was not found.");
+    }
+
+    private static void EnsurePending(Offer offer)
+    {
+        if (offer.Status != OfferStatus.PENDING)
+        {
+            throw new InvalidOperationException("The offer is no longer pending.");
+        }
     }
 }

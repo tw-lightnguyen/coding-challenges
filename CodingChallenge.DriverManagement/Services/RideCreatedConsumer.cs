@@ -27,9 +27,23 @@ public sealed class RideCreatedConsumer : RabbitMqConsumer<RideCreatedEvent>
         var pickup = new Coordinate(message.PickupLatitude, message.PickupLongitude);
         await using var scope = _scopeFactory.CreateAsyncScope();
         var matchingService = scope.ServiceProvider.GetRequiredService<DriverMatchingService>();
+        var driverService = scope.ServiceProvider.GetRequiredService<IDriverService>();
         var publisher = scope.ServiceProvider.GetRequiredService<IEventPublisher>();
 
-        var driverId = await matchingService.FindNearestAvailableDriverId(pickup);
+        if (message.IsCancelled)
+        {
+            await driverService.CancelPendingOffers(message.RideId);
+            return;
+        }
+
+        var currentOffer = await matchingService.FindActiveOfferForRide(message.RideId);
+        var driverId = currentOffer?.DriverId
+            ?? await matchingService.FindNearestAvailableDriverId(pickup, message.RideId);
+        if (driverId.HasValue && currentOffer == null)
+        {
+            await driverService.SendOfferToDriver(driverId.Value, message.RideId, 0m);
+        }
+
         await publisher.PublishAsync(
             EventRoutingKeys.DriverMatched,
             new DriverMatchedEvent(message.RideId, driverId),

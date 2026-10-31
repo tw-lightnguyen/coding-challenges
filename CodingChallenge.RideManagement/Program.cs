@@ -51,6 +51,7 @@ builder.Services.AddScoped<IRideService, RideService>();
 builder.Services.Configure<RabbitMqOptions>(builder.Configuration.GetSection("RabbitMq"));
 builder.Services.AddSingleton<IEventPublisher, RabbitMqEventPublisher>();
 builder.Services.AddHostedService<DriverMatchedConsumer>();
+builder.Services.AddHostedService<RideDriverActionCompletedConsumer>();
 
 var app = builder.Build();
 

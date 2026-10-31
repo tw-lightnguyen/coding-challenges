@@ -40,6 +40,26 @@ public class Driver : BaseModel
         Status = DriverStatus.BUSY;
     }
 
+    public void RejectOffer()
+    {
+        if (Status != DriverStatus.OFFERED)
+        {
+            throw new InvalidOperationException("Driver must have a pending offer to reject.");
+        }
+
+        Status = DriverStatus.AVAILABLE;
+    }
+
+    public void CancelOffer()
+    {
+        if (Status != DriverStatus.OFFERED)
+        {
+            throw new InvalidOperationException("Driver must have a pending offer to cancel.");
+        }
+
+        Status = DriverStatus.AVAILABLE;
+    }
+
     public void CompleteRide()
     {
         if (Status != DriverStatus.BUSY)

@@ -1,5 +1,6 @@
 using CodingChallenge.DriverManagement.Data;
 using CodingChallenge.DriverManagement.Enums;
+using CodingChallenge.DriverManagement.Models;
 using CodingChallenge.Share.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -27,15 +28,26 @@ public class DriverMatchingService
         }
     }
 
-    public async Task<Guid?> FindNearestAvailableDriverId(Coordinate pickup)
+    public async Task<Guid?> FindNearestAvailableDriverId(Coordinate pickup, Guid? rideId = null)
     {
         ArgumentNullException.ThrowIfNull(pickup);
+
+        List<Guid> excludedDriverIds = rideId.HasValue
+            ? await _dbContext.Offers
+                .Where(offer =>
+                    offer.RideId == rideId.Value &&
+                    (offer.Status == OfferStatus.REJECTED || offer.Status == OfferStatus.TIMED_OUT))
+                .Select(offer => offer.DriverId)
+                .Distinct()
+                .ToListAsync()
+            : [];
 
         var candidates = await _dbContext.Drivers
             .AsNoTracking()
             .Where(driver =>
                 driver.Status == DriverStatus.AVAILABLE &&
-                driver.Coordinate != null)
+                driver.Coordinate != null &&
+                !excludedDriverIds.Contains(driver.Id))
             .ToListAsync();
 
         return candidates
@@ -50,6 +62,15 @@ public class DriverMatchingService
             .Select(candidate => (Guid?)candidate.Id)
             .FirstOrDefault();
     }
+
+    public Task<Offer?> FindActiveOfferForRide(Guid rideId) =>
+        _dbContext.Offers
+            .AsNoTracking()
+            .Where(offer =>
+                offer.RideId == rideId &&
+                (offer.Status == OfferStatus.PENDING || offer.Status == OfferStatus.ACCEPTED))
+            .OrderByDescending(offer => offer.CreatedDateTime)
+            .FirstOrDefaultAsync();
 
     private static double CalculateDistanceKilometers(Coordinate first, Coordinate second)
     {
