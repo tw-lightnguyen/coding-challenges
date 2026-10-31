@@ -151,6 +151,7 @@ public class RideServiceTest
     {
         using var dbContext = new ApplicationDbContext(_options);
         var ride = CreateAssignedRide();
+        ride.Status = RideStatus.DRIVER_ASSIGNED;
         dbContext.Rides.Add(ride);
         await dbContext.SaveChangesAsync();
         var publisher = new FakeEventPublisher();
@@ -160,7 +161,7 @@ public class RideServiceTest
             () => service.RequestOfferResponse(ride.Id, Guid.NewGuid(), RideDriverAction.Accept));
         Assert.Empty(publisher.Messages);
 
-        ride.Status = RideStatus.MATCHING;
+        ride.Status = RideStatus.DRIVER_ASSIGNED;
         await dbContext.SaveChangesAsync();
         await service.RequestOfferResponse(ride.Id, ride.AssignedDriverId!.Value, RideDriverAction.Accept);
 
@@ -173,7 +174,7 @@ public class RideServiceTest
             ride.Id,
             ride.AssignedDriverId!.Value,
             RideDriverAction.Accept));
-        Assert.Equal(RideStatus.DRIVER_ASSIGNED, ride.Status);
+        Assert.Equal(RideStatus.DRIVER_ACCEPTED, ride.Status);
     }
 
     [Fact]
@@ -181,7 +182,7 @@ public class RideServiceTest
     {
         using var dbContext = new ApplicationDbContext(_options);
         var ride = CreateAssignedRide();
-        ride.Status = RideStatus.MATCHING;
+        ride.Status = RideStatus.DRIVER_ASSIGNED;
         dbContext.Rides.Add(ride);
         await dbContext.SaveChangesAsync();
         var publisher = new FakeEventPublisher();
@@ -222,7 +223,7 @@ public class RideServiceTest
     {
         using var dbContext = new ApplicationDbContext(_options);
         var ride = CreateAssignedRide();
-        ride.Status = RideStatus.DRIVER_ASSIGNED;
+        ride.Status = RideStatus.DRIVER_ACCEPTED;
         dbContext.Rides.Add(ride);
         await dbContext.SaveChangesAsync();
         var publisher = new FakeEventPublisher();
@@ -239,6 +240,121 @@ public class RideServiceTest
 
         Assert.Equal(RideStatus.CANCELLED, ride.Status);
         Assert.Null(ride.AssignedDriverId);
+    }
+
+    [Fact]
+    public async Task RideLifecycle_ShouldPersistMatchingAssignmentAcceptanceAndCompletion()
+    {
+        var ride = CreateAssignedRide();
+        ride.Status = RideStatus.REQUESTED;
+        var driverId = ride.AssignedDriverId!.Value;
+        ride.AssignedDriverId = null;
+
+        using (var dbContext = new ApplicationDbContext(_options))
+        {
+            dbContext.Rides.Add(ride);
+            await dbContext.SaveChangesAsync();
+            var publisher = new FakeEventPublisher();
+            var service = CreateRideService(dbContext, publisher);
+
+            await service.HandleDriverMatched(new DriverMatchedEvent(ride.Id, driverId));
+            Assert.Equal(RideStatus.DRIVER_ASSIGNED, ride.Status);
+            Assert.Equal(driverId, ride.AssignedDriverId);
+
+            await service.RequestOfferResponse(ride.Id, driverId, RideDriverAction.Accept);
+            await service.HandleDriverActionCompleted(new RideDriverActionCompletedEvent(
+                ride.Id, driverId, RideDriverAction.Accept));
+            Assert.Equal(RideStatus.DRIVER_ACCEPTED, ride.Status);
+
+            await service.CompleteRide(ride.Id);
+            await service.HandleDriverActionCompleted(new RideDriverActionCompletedEvent(
+                ride.Id, driverId, RideDriverAction.Complete));
+            Assert.Equal(RideStatus.COMPLETED, ride.Status);
+        }
+
+        using var reloadedContext = new ApplicationDbContext(_options);
+        var persistedRide = await reloadedContext.Rides.FindAsync(ride.Id);
+        Assert.NotNull(persistedRide);
+        Assert.Equal(RideStatus.COMPLETED, persistedRide.Status);
+        Assert.Equal(driverId, persistedRide.AssignedDriverId);
+    }
+
+    [Fact]
+    public async Task DriverMatchedWithoutEligibleDriver_ShouldLeaveRideMatchingAndUnassigned()
+    {
+        using var dbContext = new ApplicationDbContext(_options);
+        var ride = CreateAssignedRide();
+        ride.Status = RideStatus.REQUESTED;
+        ride.AssignedDriverId = null;
+        dbContext.Rides.Add(ride);
+        await dbContext.SaveChangesAsync();
+        var service = CreateRideService(dbContext, new FakeEventPublisher());
+
+        await service.HandleDriverMatched(new DriverMatchedEvent(ride.Id, null));
+
+        Assert.Equal(RideStatus.MATCHING, ride.Status);
+        Assert.Null(ride.AssignedDriverId);
+
+        using var reloadedContext = new ApplicationDbContext(_options);
+        var persistedRide = await reloadedContext.Rides.FindAsync(ride.Id);
+        Assert.NotNull(persistedRide);
+        Assert.Equal(RideStatus.MATCHING, persistedRide.Status);
+        Assert.Null(persistedRide.AssignedDriverId);
+    }
+
+    [Fact]
+    public async Task DuplicateAndTerminalTransitions_ShouldNotChangeRideState()
+    {
+        using var dbContext = new ApplicationDbContext(_options);
+        var ride = CreateAssignedRide();
+        ride.Status = RideStatus.DRIVER_ACCEPTED;
+        dbContext.Rides.Add(ride);
+        await dbContext.SaveChangesAsync();
+        var publisher = new FakeEventPublisher();
+        var service = CreateRideService(dbContext, publisher);
+        var driverId = ride.AssignedDriverId!.Value;
+
+        await service.HandleDriverActionCompleted(new RideDriverActionCompletedEvent(
+            ride.Id, driverId, RideDriverAction.Accept));
+        Assert.Equal(RideStatus.DRIVER_ACCEPTED, ride.Status);
+
+        await service.HandleDriverActionCompleted(new RideDriverActionCompletedEvent(
+            ride.Id, driverId, RideDriverAction.Cancel));
+        Assert.Equal(RideStatus.CANCELLED, ride.Status);
+        await service.HandleDriverActionCompleted(new RideDriverActionCompletedEvent(
+            ride.Id, driverId, RideDriverAction.Complete));
+        await service.HandleDriverMatched(new DriverMatchedEvent(ride.Id, Guid.NewGuid()));
+
+        Assert.Equal(RideStatus.CANCELLED, ride.Status);
+        Assert.Null(ride.AssignedDriverId);
+        Assert.Empty(publisher.Messages);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.CompleteRide(ride.Id));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.CancelRide(ride.Id));
+    }
+
+    [Fact]
+    public async Task CompletedRide_ShouldRejectFurtherTransitions()
+    {
+        using var dbContext = new ApplicationDbContext(_options);
+        var ride = CreateAssignedRide();
+        ride.Status = RideStatus.COMPLETED;
+        dbContext.Rides.Add(ride);
+        await dbContext.SaveChangesAsync();
+        var service = CreateRideService(dbContext, new FakeEventPublisher());
+        var driverId = ride.AssignedDriverId!.Value;
+
+        await service.HandleDriverMatched(new DriverMatchedEvent(ride.Id, Guid.NewGuid()));
+        await service.HandleDriverActionCompleted(new RideDriverActionCompletedEvent(
+            ride.Id, driverId, RideDriverAction.Accept));
+        await service.HandleDriverActionCompleted(new RideDriverActionCompletedEvent(
+            ride.Id, driverId, RideDriverAction.Cancel));
+
+        Assert.Equal(RideStatus.COMPLETED, ride.Status);
+        Assert.Equal(driverId, ride.AssignedDriverId);
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.RequestOfferResponse(ride.Id, driverId, RideDriverAction.Accept));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.CancelRide(ride.Id));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.CompleteRide(ride.Id));
     }
 
     private static CodingChallenge.RideManagement.Models.Ride CreateAssignedRide() =>

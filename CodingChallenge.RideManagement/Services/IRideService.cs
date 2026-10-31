@@ -8,6 +8,7 @@ public interface IRideService
 {
     Task<Ride> CreateRide(CreateRideRequest request, Guid idempotencyKey);
     Task<Ride?> GetRideById(Guid rideId);
+    Task HandleDriverMatched(DriverMatchedEvent message);
     Task RequestOfferResponse(Guid rideId, Guid driverId, RideDriverAction action);
     Task CancelRide(Guid rideId);
     Task CompleteRide(Guid rideId);

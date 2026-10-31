@@ -79,6 +79,43 @@ public class RideService : IRideService
         return await _dbContext.Rides.FindAsync(rideId);
     }
 
+    public async Task HandleDriverMatched(DriverMatchedEvent message)
+    {
+        var ride = await GetRequiredRide(message.RideId);
+        if (ride.Status is RideStatus.DRIVER_ASSIGNED or RideStatus.DRIVER_ACCEPTED
+            or RideStatus.CANCELLED or RideStatus.COMPLETED)
+        {
+            return;
+        }
+
+        if (ride.Status is not (RideStatus.REQUESTED or RideStatus.MATCHING))
+        {
+            return;
+        }
+
+        if (ride.AssignedDriverId.HasValue)
+        {
+            if (ride.AssignedDriverId == message.DriverId)
+            {
+                return;
+            }
+
+            return;
+        }
+
+        if (message.DriverId.HasValue)
+        {
+            ride.AssignedDriverId = message.DriverId;
+            ride.Status = RideStatus.DRIVER_ASSIGNED;
+        }
+        else
+        {
+            ride.Status = RideStatus.MATCHING;
+        }
+
+        await _dbContext.SaveChangesAsync();
+    }
+
     public async Task RequestOfferResponse(Guid rideId, Guid driverId, RideDriverAction action)
     {
         if (action is not (RideDriverAction.Accept or RideDriverAction.Reject))
@@ -87,7 +124,7 @@ public class RideService : IRideService
         }
 
         var ride = await GetRequiredRide(rideId);
-        if (ride.Status != RideStatus.MATCHING || ride.AssignedDriverId != driverId)
+        if (ride.Status != RideStatus.DRIVER_ASSIGNED || ride.AssignedDriverId != driverId)
         {
             throw new InvalidOperationException("Only the driver holding the current offer can respond.");
         }
@@ -100,7 +137,8 @@ public class RideService : IRideService
     public async Task CancelRide(Guid rideId)
     {
         var ride = await GetRequiredRide(rideId);
-        if (ride.Status is not (RideStatus.REQUESTED or RideStatus.MATCHING or RideStatus.DRIVER_ASSIGNED))
+        if (ride.Status is not (RideStatus.REQUESTED or RideStatus.MATCHING
+            or RideStatus.DRIVER_ASSIGNED or RideStatus.DRIVER_ACCEPTED))
         {
             throw new InvalidOperationException("This ride can no longer be cancelled.");
         }
@@ -127,7 +165,7 @@ public class RideService : IRideService
     public async Task CompleteRide(Guid rideId)
     {
         var ride = await GetRequiredRide(rideId);
-        if (ride.Status != RideStatus.DRIVER_ASSIGNED || !ride.AssignedDriverId.HasValue)
+        if (ride.Status != RideStatus.DRIVER_ACCEPTED || !ride.AssignedDriverId.HasValue)
         {
             throw new InvalidOperationException("Only an accepted ride can be completed.");
         }
@@ -147,11 +185,11 @@ public class RideService : IRideService
 
         switch (message.Action)
         {
-            case RideDriverAction.Accept when ride.Status == RideStatus.MATCHING:
-                ride.Status = RideStatus.DRIVER_ASSIGNED;
+            case RideDriverAction.Accept when ride.Status == RideStatus.DRIVER_ASSIGNED:
+                ride.Status = RideStatus.DRIVER_ACCEPTED;
                 await _dbContext.SaveChangesAsync();
                 break;
-            case RideDriverAction.Reject when ride.Status == RideStatus.MATCHING:
+            case RideDriverAction.Reject when ride.Status == RideStatus.DRIVER_ASSIGNED:
                 ride.AssignedDriverId = null;
                 ride.Status = RideStatus.MATCHING;
                 await _dbContext.SaveChangesAsync();
@@ -162,12 +200,13 @@ public class RideService : IRideService
                         ride.Pickup.Latitude,
                         ride.Pickup.Longtitude));
                 break;
-            case RideDriverAction.Cancel when ride.Status is RideStatus.MATCHING or RideStatus.DRIVER_ASSIGNED:
+            case RideDriverAction.Cancel when ride.Status is RideStatus.DRIVER_ASSIGNED
+                or RideStatus.DRIVER_ACCEPTED:
                 ride.AssignedDriverId = null;
                 ride.Status = RideStatus.CANCELLED;
                 await _dbContext.SaveChangesAsync();
                 break;
-            case RideDriverAction.Complete when ride.Status == RideStatus.DRIVER_ASSIGNED:
+            case RideDriverAction.Complete when ride.Status == RideStatus.DRIVER_ACCEPTED:
                 ride.Status = RideStatus.COMPLETED;
                 await _dbContext.SaveChangesAsync();
                 break;
