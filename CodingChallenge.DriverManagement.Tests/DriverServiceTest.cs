@@ -400,6 +400,31 @@ public class DriverServiceTest
     }
 
     [Fact]
+    public async Task AcceptOffer_WhenRepeated_ShouldKeepOfferAndDriverAcceptedOnce()
+    {
+        using var dbContext = new ApplicationDbContext(CreateIsolatedOptions());
+        var driver = new Driver
+        {
+            Name = "Idempotent acceptance",
+            Status = DriverStatus.AVAILABLE
+        };
+        dbContext.Drivers.Add(driver);
+        await dbContext.SaveChangesAsync();
+
+        var rideId = Guid.NewGuid();
+        var service = new DriverService(dbContext);
+        await service.SendOfferToDriver(driver.Id, rideId, 100m);
+
+        var firstAcceptance = await service.AcceptOffer(rideId, driver.Id);
+        var repeatedAcceptance = await service.AcceptOffer(rideId, driver.Id);
+
+        Assert.Equal(firstAcceptance.Id, repeatedAcceptance.Id);
+        Assert.Single(dbContext.Offers);
+        Assert.Equal(OfferStatus.ACCEPTED, repeatedAcceptance.Status);
+        Assert.Equal(DriverStatus.BUSY, driver.Status);
+    }
+
+    [Fact]
     public async Task RejectOffer_ShouldExcludeDriverFromTheSameRideMatching()
     {
         // Arrange

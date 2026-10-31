@@ -79,20 +79,25 @@ public class RideServiceTest
         // Act
         var ride = await service.CreateRide(request, idempotencyKey);
         var ride2 = await service.CreateRide(request, idempotencyKey);
+        var ride3 = await service.CreateRide(request, idempotencyKey);
 
         //Assert
         Assert.NotNull(ride);
         Assert.NotNull(ride2);
+        Assert.NotNull(ride3);
         Assert.Equal(ride.Id, ride2.Id);
+        Assert.Equal(ride.Id, ride3.Id);
         Assert.Equivalent(ride.Pickup, ride2.Pickup);
         Assert.Equivalent(ride.Destination, ride2.Destination);
         Assert.Equal(ride.Status, ride2.Status);
         Assert.Equal(ride.PassengerId, ride2.PassengerId);
-        Assert.Equal(2, eventPublisher.Messages.Count);
+        Assert.Single(dbContext.Rides);
+        Assert.Single(dbContext.IdempotencyKeys);
+        Assert.Equal(3, eventPublisher.Messages.Count);
     }
 
     [Fact]
-    public async Task CreateRide_WithSameIdempotencyKeyAndDifferentRequest_ShouldThrowException()
+    public async Task CreateRide_WithSameIdempotencyKeyAndDifferentRequest_ShouldRejectKeyReuse()
     {
         //Arrage
         var idempotencyKey = Guid.NewGuid();
@@ -115,7 +120,8 @@ public class RideServiceTest
 
         // Act
         var ride = await service.CreateRide(request, idempotencyKey);
-        await Assert.ThrowsAsync<Exception>(async () => await service.CreateRide(request2, idempotencyKey));
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.CreateRide(request2, idempotencyKey));
     }
 
     [Fact]
@@ -362,6 +368,36 @@ public class RideServiceTest
             () => service.RequestOfferResponse(ride.Id, driverId, RideDriverAction.Accept));
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.CancelRide(ride.Id));
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.CompleteRide(ride.Id));
+    }
+
+    [Fact]
+    public async Task DuplicateDriverActionEvents_ShouldApplyEachRideTransitionOnlyOnce()
+    {
+        using var dbContext = new ApplicationDbContext(_options);
+        var ride = CreateAssignedRide();
+        ride.Status = RideStatus.DRIVER_ASSIGNED;
+        var driverId = ride.AssignedDriverId!.Value;
+        dbContext.Rides.Add(ride);
+        await dbContext.SaveChangesAsync();
+        var service = CreateRideService(dbContext, new FakeEventPublisher());
+        var acceptedEvent = new RideDriverActionCompletedEvent(
+            ride.Id, driverId, RideDriverAction.Accept);
+        var completedEvent = new RideDriverActionCompletedEvent(
+            ride.Id, driverId, RideDriverAction.Complete);
+
+        await service.HandleDriverActionCompleted(acceptedEvent);
+        await service.HandleDriverActionCompleted(acceptedEvent);
+        Assert.Equal(RideStatus.DRIVER_ACCEPTED, ride.Status);
+
+        await service.HandleDriverActionCompleted(completedEvent);
+        await service.HandleDriverActionCompleted(completedEvent);
+
+        Assert.Equal(RideStatus.COMPLETED, ride.Status);
+        using var reloadedContext = new ApplicationDbContext(_options);
+        var persistedRide = await reloadedContext.Rides.FindAsync(ride.Id);
+        Assert.NotNull(persistedRide);
+        Assert.Equal(RideStatus.COMPLETED, persistedRide.Status);
+        Assert.Equal(driverId, persistedRide.AssignedDriverId);
     }
 
     private static CodingChallenge.RideManagement.Models.Ride CreateAssignedRide() =>

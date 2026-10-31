@@ -5,6 +5,7 @@ using CodingChallenge.RideManagement.Enums;
 using CodingChallenge.RideManagement.Helpers;
 using CodingChallenge.RideManagement.Models;
 using CodingChallenge.Share.Messaging;
+using Microsoft.EntityFrameworkCore;
 
 namespace CodingChallenge.RideManagement.Services;
 
@@ -23,23 +24,13 @@ public class RideService : IRideService
 
     public async Task<Ride> CreateRide(CreateRideRequest request, Guid idempotencyKey)
     {
-        var existing = _dbContext.IdempotencyKeys.FirstOrDefault(r => r.Id == idempotencyKey);
+        var requestHash = RequestHelper.Hash(request);
+        var existing = await _dbContext.IdempotencyKeys
+            .AsNoTracking()
+            .FirstOrDefaultAsync(record => record.Id == idempotencyKey);
         if (existing != null)
         {
-            var requestHash = RequestHelper.Hash(request);
-            if (existing.RequestHash != requestHash)
-            {
-                throw new Exception("Idempotency key was already used with a different request.");
-            }
-
-            var existingRide = JsonSerializer.Deserialize<Ride>(existing.Response)!;
-            var currentRide = await _dbContext.Rides.FindAsync(existingRide.Id);
-            if (currentRide?.Status != RideStatus.CANCELLED)
-            {
-                await PublishRideCreated(existingRide);
-            }
-
-            return existingRide;
+            return await ReturnIdempotentRide(existing, requestHash);
         }
 
         var ride = new Ride
@@ -53,26 +44,33 @@ public class RideService : IRideService
         var idempotencyRecord = new IdempotencyKey
         {
             Id = idempotencyKey,
-            RequestHash = RequestHelper.Hash(request),
+            RequestHash = requestHash,
             Response = JsonSerializer.Serialize(ride)
         };
 
         var result = await _dbContext.Rides.AddAsync(ride);
         await _dbContext.IdempotencyKeys.AddAsync(idempotencyRecord);
 
-        await _dbContext.SaveChangesAsync();
+        try
+        {
+            await _dbContext.SaveChangesAsync();
+        }
+        catch (DbUpdateException)
+        {
+            var concurrentRecord = await _dbContext.IdempotencyKeys
+                .AsNoTracking()
+                .FirstOrDefaultAsync(record => record.Id == idempotencyKey);
+            if (concurrentRecord == null)
+            {
+                throw;
+            }
+
+            return await ReturnIdempotentRide(concurrentRecord, requestHash);
+        }
 
         await PublishRideCreated(result.Entity);
         return result.Entity;
     }
-
-    private Task PublishRideCreated(Ride ride) =>
-        _eventPublisher.PublishAsync(
-            EventRoutingKeys.RideCreated,
-            new RideCreatedEvent(
-                ride.Id,
-                ride.Pickup.Latitude,
-                ride.Pickup.Longtitude));
 
     public async Task<Ride?> GetRideById(Guid rideId)
     {
@@ -212,6 +210,32 @@ public class RideService : IRideService
                 break;
         }
     }
+
+    private async Task<Ride> ReturnIdempotentRide(IdempotencyKey record, string requestHash)
+    {
+        if (record.RequestHash != requestHash)
+        {
+            throw new InvalidOperationException("Idempotency key was already used with a different request.");
+        }
+
+        var ride = JsonSerializer.Deserialize<Ride>(record.Response)
+            ?? throw new InvalidOperationException("The stored idempotency response is invalid.");
+        var currentRide = await _dbContext.Rides.FindAsync(ride.Id);
+        if (currentRide?.Status != RideStatus.CANCELLED)
+        {
+            await PublishRideCreated(ride);
+        }
+
+        return ride;
+    }
+
+    private Task PublishRideCreated(Ride ride) =>
+        _eventPublisher.PublishAsync(
+            EventRoutingKeys.RideCreated,
+            new RideCreatedEvent(
+                ride.Id,
+                ride.Pickup.Latitude,
+                ride.Pickup.Longtitude));
 
     private async Task<Ride> GetRequiredRide(Guid rideId)
     {
