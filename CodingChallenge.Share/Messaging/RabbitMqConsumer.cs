@@ -64,7 +64,8 @@ public abstract class RabbitMqConsumer<TEvent> : BackgroundService
             Port = _options.Port,
             UserName = _options.UserName,
             Password = _options.Password,
-            AutomaticRecoveryEnabled = true
+            AutomaticRecoveryEnabled = true,
+            DispatchConsumersAsync = true
         };
 
         using var connection = factory.CreateConnection();
@@ -73,14 +74,14 @@ public abstract class RabbitMqConsumer<TEvent> : BackgroundService
         RabbitMqTopology.Declare(channel);
         channel.BasicQos(0, prefetchCount: 1, global: false);
 
-        var consumer = new EventingBasicConsumer(channel);
-        consumer.Received += (_, eventArgs) =>
+        var consumer = new AsyncEventingBasicConsumer(channel);
+        consumer.Received += async (_, eventArgs) =>
         {
             try
             {
                 var message = JsonSerializer.Deserialize<TEvent>(eventArgs.Body.Span)
                     ?? throw new InvalidOperationException($"Received an empty {typeof(TEvent).Name} message.");
-                HandleEventAsync(message, stoppingToken).GetAwaiter().GetResult();
+                await HandleEventAsync(message, stoppingToken);
                 channel.BasicAck(eventArgs.DeliveryTag, multiple: false);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
