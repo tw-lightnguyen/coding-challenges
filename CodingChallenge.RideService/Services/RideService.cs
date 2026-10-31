@@ -53,4 +53,9 @@ public class RideService
         
         return result.Entity;
     }
+
+    public async Task<Ride?> GetRideById(Guid rideId)
+    {
+        return await _dbContext.Rides.FindAsync(rideId);
+    }
 }

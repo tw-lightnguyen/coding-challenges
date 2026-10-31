@@ -5,6 +5,6 @@ namespace CodingChallenge.RideService.Dtos;
 public class CreateRideRequest
 {
     public Guid PassengerId { get; set; }
-    public Coordinate Pickup { get; set; }
-    public Coordinate Destination { get; set; }
+    public required Coordinate Pickup { get; set; }
+    public required Coordinate Destination { get; set; }
 }

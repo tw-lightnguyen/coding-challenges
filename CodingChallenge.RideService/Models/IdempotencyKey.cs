@@ -6,6 +6,6 @@ public class IdempotencyKey
 {
     [Key]
     public Guid Id { get; set; }
-    public string RequestHash { get; set; }
-    public string Response { get; set; }
+    public required string RequestHash { get; set; }
+    public required string Response { get; set; }
 }

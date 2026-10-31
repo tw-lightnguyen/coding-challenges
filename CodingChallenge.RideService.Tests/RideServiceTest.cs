@@ -105,6 +105,35 @@ public class RideServiceTest
         await Assert.ThrowsAsync<Exception>(async () => await service.CreateRide(request2, idempotencyKey));
     }
 
+    [Fact]
+    public async Task GetRideById_AfterCreatingRide_ShouldReturnRide()
+    {
+        // Arrange
+        var idempotencyKey = Guid.NewGuid();
+
+        var request = new CreateRideRequest
+        {
+            PassengerId = Guid.CreateVersion7(),
+            Pickup = new Coordinate(RandomFloat(-90f, 90f), RandomFloat(-180f, 180f)),
+            Destination = new Coordinate(RandomFloat(-90f, 90f), RandomFloat(-180f, 180f))
+        };
+
+        using var dbContext = new ApplicationDbContext(_options);
+        var service = new Services.RideService(dbContext);
+
+        // Act
+        var createdRide = await service.CreateRide(request, idempotencyKey);
+        var retrievedRide = await service.GetRideById(createdRide.Id);
+
+        // Assert
+        Assert.NotNull(retrievedRide);
+        Assert.Equal(createdRide.Id, retrievedRide!.Id);
+        Assert.Equal(createdRide.PassengerId, retrievedRide.PassengerId);
+        Assert.Equal(createdRide.Pickup, retrievedRide.Pickup);
+        Assert.Equal(createdRide.Destination, retrievedRide.Destination);
+        Assert.Equal(createdRide.Status, retrievedRide.Status);
+    }
+
     private static float RandomFloat(float min, float max)
     {
         return (Random.Shared.NextSingle() * (max - min)) + min;
